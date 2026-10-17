@@ -1,8 +1,9 @@
+
 const mongoose = require('mongoose');
 
 const conectarDB = async () => {
     try {
-        await mongoose.connect('mongodb+srv://victorapi:victorapi@clusterapi.ckvz3rj.mongodb.net/');
+        await mongoose.connect(process.env.MONGODB_URI);
 
         console.log('Conexión a MongoDB correcta');
     } catch (error) {
