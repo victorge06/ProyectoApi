@@ -7,7 +7,7 @@ import rateLimit from "express-rate-limit"
 import swaggerUi from "swagger-ui-express"
 import swaggerDocument from "./openapi.json" with { type: "json" }
 
-const PUERTO = process.env.PORT || 3000
+const PUERTO = process.env.PORT || 3001
 const URL_BD = process.env.MONGODB_URI
 const NOMBRE_BD = process.env.DB_NAME || 'api'
 const SECRET_KEY = process.env.JWT_SECRET       // Firma el access token
@@ -88,8 +88,8 @@ app.post('/api/login', async (request, response) => {
         return response.status(400).json({ message: 'nombre y password son obligatorios' })
 
     const user = await usuarios.findOne({ nombre })
-
-    if (!user || !(await bcrypt.compare(password, user.password))) {
+    
+if (!user || !user.password || !(await bcrypt.compare(password, user.password))) {
         return response.status(401).json({ message: "Credenciales incorrectas" })
     }
 
