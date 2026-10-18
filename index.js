@@ -1,300 +1,288 @@
-require("dotenv").config();
+import { MongoClient } from 'mongodb'
+import express from "express"
+import cors from "cors"
+import bcrypt from "bcryptjs"
+import jwt from "jsonwebtoken"
+import rateLimit from "express-rate-limit"
+import swaggerUi from "swagger-ui-express"
+import swaggerDocument from "./openapi.json" with { type: "json" }
 
-const express = require("express");
-const rateLimit = require("express-rate-limit");
-const swaggerUi = require("swagger-ui-express");
-const swaggerJsdoc = require("swagger-jsdoc");
-const conectarDB = require("./config/database");
-const Videojuego = require("./models/Videojuego");
-const authRoutes = require("./routes/auth");
-const verificarToken = require("./middleware/auth");
+const PUERTO = process.env.PORT || 3000
+const URL_BD = process.env.MONGODB_URI
+const NOMBRE_BD = process.env.DB_NAME || 'api'
+const SECRET_KEY = process.env.JWT_SECRET       // Firma el access token
+const REFRESH_KEY = process.env.REFRESH_SECRET  // Firma el refresh token
 
-const app = express();
+if (!URL_BD || !SECRET_KEY || !REFRESH_KEY) {
+    console.error('Faltan variables de entorno: MONGODB_URI, JWT_SECRET y/o REFRESH_SECRET')
+    process.exit(1)
+}
 
-
-const swaggerOptions = {
-    definition: {
-        openapi: "3.0.0",
-        info: {
-            title: "API REST de Videojuegos",
-            version: "1.0.0",
-            description: "API REST creada con Node.js, Express y MongoDB"
-        },
-        servers: [
-            {
-                url: 'https://proyectoapi-s0yl.onrender.com'
-            }
-        ],
-        components: {
-            securitySchemes: {
-                bearerAuth: {
-                    type: "http",
-                    scheme: "bearer",
-                    bearerFormat: "JWT"
-                }
-            }
-        }
-    },
-    apis: ["./index.js", "./routes/*.js"]
-};
-
-
-const swaggerSpec = swaggerJsdoc(swaggerOptions);
-
-app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+const app = express()
+app.set('trust proxy', 1)
+app.use(express.json())
+app.use(cors())
 
 const limiter = rateLimit({
     windowMs: 15 * 60 * 1000,
-    max: 100,
-    message: {
-        mensaje: "Demasiadas peticiones. Inténtalo más tarde."
-    }
-});
+    limit: 100,
+    message: { message: 'Demasiadas peticiones, inténtalo más tarde' }
+})
+app.use(limiter)
 
-app.use(limiter);
+const cliente = new MongoClient(URL_BD, { serverSelectionTimeoutMS: 5000 })
+try {
+    await cliente.connect()
+} catch (err) {
+    console.error('No se pudo conectar con MongoDB:', err.message)
+    process.exit(1)
+}
 
-app.use(express.json());
-app.use("/auth", authRoutes);
+const bd = cliente.db(NOMBRE_BD)
+const usuarios = bd.collection('users')
+const videojuegos = bd.collection('videojuegos')
+const SIN_PASSWORD = { projection: { password: 0 } } // La contraseña nunca se devuelve
 
-app.use(express.json());
+if (await usuarios.countDocuments() === 0) {
+    await usuarios.insertMany([
+        { id: 0, nombre: "Victor", edad: 30, password: "$2b$10$GKVrVRMRtW4is6bXwqQU8eDLr6hyh45adNIEq2aXNpwMdzQVKoRAu" }, // password: 123456
+        { id: 1, nombre: "Ana", edad: 25, password: "$2b$10$l/.WxXkTG6pKVB7KYU/KROXVvH7nAQqyrsq5PW1b.1X4v6L2u00u2" }, // password: ana
+        { id: 2, nombre: "Eva", edad: 28, password: "$2b$10$TW/qH6MQ/fd4sRijnHIdoekydhtIonurDMvxZHgqNaIR4st2A90Xe" }  // password: eva
+    ])
+}
 
-const PORT = 3000;
+if (await videojuegos.countDocuments() === 0) {
+    await videojuegos.insertMany([
+        { id: 0, titulo: "The Legend of Zelda: Breath of the Wild", plataforma: "Nintendo Switch", genero: "Aventura", precio: 59.99, lanzamiento: 2017 },
+        { id: 1, titulo: "Minecraft", plataforma: "PC", genero: "Sandbox", precio: 29.99, lanzamiento: 2011 }
+    ])
+}
 
-app.get("/", (req, res) => {
-    res.send("Mi API REST funciona correctamente");
-});
+function verifyToken(request, response, next) {
+    const cabecera = request.headers.authorization || ''
+    const [esquema, token] = cabecera.split(' ')
 
-/**
- * @swagger
- * /prueba:
- *   get:
- *     summary: Comprobar que la API funciona
- *     description: Comprueba que la API responde correctamente y que MongoDB está conectada.
- *     responses:
- *       200:
- *         description: La API funciona correctamente
- */
+    if (esquema !== 'Bearer' || !token)
+        return response.status(401).json({ message: 'Token no proporcionado' })
 
-app.get("/prueba", (req, res) => {
-    res.json({
-        mensaje: "La API funciona correctamente",
-        baseDatos: "MongoDB conectada"
-    });
-});
-
-const iniciarServidor = async () => {
-    await conectarDB();
-
-    app.listen(PORT, () => {
-        console.log(`Servidor iniciado en http://localhost:${PORT}`);
-    });
-};
-
-
-/**
- * @swagger
- * /videojuegos:
- *   get:
- *     summary: Obtener todos los videojuegos
- *     description: Devuelve la lista de videojuegos guardados en MongoDB.
- *     responses:
- *       200:
- *         description: Lista de videojuegos obtenida correctamente
- *       500:
- *         description: Error al obtener los videojuegos
- */
-
-app.get("/videojuegos", async (req, res) => {
     try {
-        const videojuegos = await Videojuego.find();
-
-        res.json(videojuegos);
-    } catch (error) {
-        res.status(500).json({
-            mensaje: "Error al obtener los videojuegos"
-        });
+        request.user = jwt.verify(token, SECRET_KEY)
+        next()
+    } catch {
+        return response.status(401).json({ message: 'Token no válido o caducado' })
     }
-});
+}
 
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument))
 
-/**
- * @swagger
- * /videojuegos:
- *   post:
- *     summary: Crear un videojuego
- *     description: Guarda un nuevo videojuego en MongoDB. Requiere autenticación.
- *     security:
- *       - bearerAuth: []
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - titulo
- *               - plataforma
- *               - genero
- *               - precio
- *               - lanzamiento
- *             properties:
- *               titulo:
- *                 type: string
- *                 example: Minecraft
- *               plataforma:
- *                 type: string
- *                 example: PC
- *               genero:
- *                 type: string
- *                 example: Sandbox
- *               precio:
- *                 type: number
- *                 example: 29.99
- *               lanzamiento:
- *                 type: integer
- *                 example: 2011
- *     responses:
- *       201:
- *         description: Videojuego creado correctamente
- *       401:
- *         description: Falta el token de autenticación
- *       403:
- *         description: Token no válido o caducado
- */
+app.get("/", (request, response) => response.redirect("/api-docs"))
 
-app.post("/videojuegos", verificarToken, async (req, res) => {
+// LOGIN PRINCIPAL
+app.post('/api/login', async (request, response) => {
+    if (!request.is('json'))
+        return response.json({ message: 'Debes proporcionar datos JSON' })
+
+    const { nombre, password } = request.body
+
+    if (!nombre || !password)
+        return response.status(400).json({ message: 'nombre y password son obligatorios' })
+
+    const user = await usuarios.findOne({ nombre })
+
+    if (!user || !(await bcrypt.compare(password, user.password))) {
+        return response.status(401).json({ message: "Credenciales incorrectas" })
+    }
+
+    const accessToken = jwt.sign(
+        { id: user._id, nombre: user.nombre },
+        SECRET_KEY,
+        { expiresIn: '15m' }
+    )
+
+    const refreshToken = jwt.sign(
+        { id: user._id, nombre: user.nombre },
+        REFRESH_KEY,
+        { expiresIn: '7d' }
+    )
+
+    response.json({ accessToken, refreshToken })
+})
+
+// REFRESH TOKEN
+app.post('/api/refresh', async (request, response) => {
+    if (!request.is('json'))
+        return response.json({ message: 'Debes proporcionar datos JSON' })
+
+    const { refreshToken } = request.body
+    if (!refreshToken) return response.status(401).json({ message: "Refresh token requerido" })
+
     try {
-        const videojuego = new Videojuego(req.body);
-
-        await videojuego.save();
-
-        res.status(201).json(videojuego);
-    } catch (error) {
-        res.status(500).json({
-            mensaje: "Error al guardar el videojuego"
-        });
+        const user = jwt.verify(refreshToken, REFRESH_KEY)
+        const accessToken = jwt.sign(
+            { id: user.id, nombre: user.nombre },
+            SECRET_KEY,
+            { expiresIn: '15m' }
+        )
+        response.json({ accessToken })
+    } catch (err) {
+        return response.status(401).json({ message: "Refresh token inválido o expirado" })
     }
-});
+})
 
+// -------------- Usuarios ------------------
 
-/**
- * @swagger
- * /videojuegos/{id}:
- *   put:
- *     summary: Modificar un videojuego
- *     description: Modifica un videojuego existente mediante su ID.
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema:
- *           type: string
- *         description: ID del videojuego
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               titulo:
- *                 type: string
- *                 example: Minecraft
- *               plataforma:
- *                 type: string
- *                 example: PC
- *               genero:
- *                 type: string
- *                 example: Sandbox
- *               precio:
- *                 type: number
- *                 example: 29.99
- *               lanzamiento:
- *                 type: integer
- *                 example: 2011
- *     responses:
- *       200:
- *         description: Videojuego modificado correctamente
- *       401:
- *         description: Falta el token de autenticación
- *       403:
- *         description: Token no válido o caducado
- *       404:
- *         description: Videojuego no encontrado
- */
+app.get('/api/users', async (request, response) => {
+    const lista = await usuarios.find({}, SIN_PASSWORD).toArray()
+    response.json(lista)
+})
 
-app.put("/videojuegos/:id", verificarToken, async (req, res) => {
-    try {
-        const videojuego = await Videojuego.findByIdAndUpdate(
-            req.params.id,
-            req.body,
-            { new: true, runValidators: true }
-        );
+app.get('/api/users/:id', async (request, response) => {
+    const id = Number(request.params.id)
+    if (!Number.isInteger(id))
+        return response.status(400).json({ message: 'Id no válido' })
 
-        if (!videojuego) {
-            return res.status(404).json({
-                mensaje: "Videojuego no encontrado"
-            });
-        }
-
-        res.json(videojuego);
-    } catch (error) {
-        res.status(500).json({
-            mensaje: "Error al modificar el videojuego"
-        });
+    const user = await usuarios.findOne({ id }, SIN_PASSWORD)
+    if (user) {
+        return response.json(user)
+    } else {
+        return response.status(404).json({ message: 'El elemento no ha sido encontrado' })
     }
-});
+})
 
+app.post('/api/users', verifyToken, async (request, response) => {
+    if (!request.is('json'))
+        return response.json({ message: 'Debes proporcionar datos JSON' })
 
-/**
- * @swagger
- * /videojuegos/{id}:
- *   delete:
- *     summary: Eliminar un videojuego
- *     description: Elimina un videojuego de MongoDB mediante su ID.
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema:
- *           type: string
- *         description: ID del videojuego
- *     responses:
- *       200:
- *         description: Videojuego eliminado correctamente
- *       401:
- *         description: Falta el token de autenticación
- *       403:
- *         description: Token no válido o caducado
- *       404:
- *         description: Videojuego no encontrado
- */
+    const { nombre, edad, password } = request.body
 
-app.delete("/videojuegos/:id", verificarToken, async (req, res) => {
-    try {
-        const videojuego = await Videojuego.findByIdAndDelete(
-            req.params.id
-        );
+    if (!nombre || !password)
+        return response.status(400).json({ message: 'nombre y password son obligatorios' })
 
-        if (!videojuego) {
-            return res.status(404).json({
-                mensaje: "Videojuego no encontrado"
-            });
-        }
+    if (await usuarios.findOne({ nombre }))
+        return response.status(409).json({ message: 'Ese usuario ya existe' })
 
-        res.json({
-            mensaje: "Videojuego eliminado correctamente"
-        });
-    } catch (error) {
-        res.status(500).json({
-            mensaje: "Error al eliminar el videojuego"
-        });
+    const ultimo = await usuarios.find().sort({ id: -1 }).limit(1).toArray()
+    const id = ultimo.length ? ultimo[0].id + 1 : 0
+    const hashedPassword = await bcrypt.hash(password, 10)
+
+    await usuarios.insertOne({ id, nombre, edad, password: hashedPassword })
+    const lista = await usuarios.find({}, SIN_PASSWORD).toArray()
+    return response.json(lista)
+})
+
+app.put('/api/users/:id', verifyToken, async (request, response) => {
+    if (!request.is('json'))
+        return response.json({ message: 'Debes proporcionar datos JSON' })
+
+    const id = Number(request.params.id)
+    if (!Number.isInteger(id))
+        return response.status(400).json({ message: 'Id no válido' })
+
+    const { nombre, edad } = request.body
+    const resultado = await usuarios.updateOne(
+        { id },
+        { $set: { nombre, edad } }
+    )
+
+    if (resultado.matchedCount > 0) {
+        const lista = await usuarios.find({}, SIN_PASSWORD).toArray()
+        return response.json(lista)
+    } else {
+        return response.status(404).json({ message: 'El elemento no ha sido encontrado' })
     }
-});
+})
 
+app.delete('/api/users/:id', verifyToken, async (request, response) => {
+    const id = Number(request.params.id)
+    if (!Number.isInteger(id))
+        return response.status(400).json({ message: 'Id no válido' })
 
-iniciarServidor();
+    const resultado = await usuarios.deleteOne({ id })
+
+    if (resultado.deletedCount > 0) {
+        const lista = await usuarios.find({}, SIN_PASSWORD).toArray()
+        return response.json(lista)
+    } else {
+        return response.status(404).json({ message: 'El elemento no ha sido encontrado' })
+    }
+})
+
+// -------------- VIDEOJUEGOS ------------------
+
+app.get('/api/videojuegos', async (request, response) => {
+    const lista = await videojuegos.find({}).toArray()
+    response.json(lista)
+})
+
+app.get('/api/videojuegos/:id', async (request, response) => {
+    const id = Number(request.params.id)
+    if (!Number.isInteger(id))
+        return response.status(400).json({ message: 'Id no válido' })
+
+    const videojuego = await videojuegos.findOne({ id })
+    if (videojuego) {
+        return response.json(videojuego)
+    } else {
+        return response.status(404).json({ message: 'El elemento no ha sido encontrado' })
+    }
+})
+
+app.post('/api/videojuegos', verifyToken, async (request, response) => {
+    if (!request.is('json'))
+        return response.json({ message: 'Debes proporcionar datos JSON' })
+
+    const { titulo, plataforma, genero, precio, lanzamiento } = request.body
+
+    const ultimo = await videojuegos.find().sort({ id: -1 }).limit(1).toArray()
+    const id = ultimo.length ? ultimo[0].id + 1 : 0
+
+    await videojuegos.insertOne({ id, titulo, plataforma, genero, precio, lanzamiento })
+    const lista = await videojuegos.find({}).toArray()
+    return response.json(lista)
+})
+
+app.put('/api/videojuegos/:id', verifyToken, async (request, response) => {
+    if (!request.is('json'))
+        return response.json({ message: 'Debes proporcionar datos JSON' })
+
+    const id = Number(request.params.id)
+    if (!Number.isInteger(id))
+        return response.status(400).json({ message: 'Id no válido' })
+
+    const { titulo, plataforma, genero, precio, lanzamiento } = request.body
+    const resultado = await videojuegos.updateOne(
+        { id },
+        { $set: { titulo, plataforma, genero, precio, lanzamiento } }
+    )
+
+    if (resultado.matchedCount > 0) {
+        const lista = await videojuegos.find({}).toArray()
+        return response.json(lista)
+    } else {
+        return response.status(404).json({ message: 'El elemento no ha sido encontrado' })
+    }
+})
+
+app.delete('/api/videojuegos/:id', verifyToken, async (request, response) => {
+    const id = Number(request.params.id)
+    if (!Number.isInteger(id))
+        return response.status(400).json({ message: 'Id no válido' })
+
+    const resultado = await videojuegos.deleteOne({ id })
+
+    if (resultado.deletedCount > 0) {
+        const lista = await videojuegos.find({}).toArray()
+        return response.json(lista)
+    } else {
+        return response.status(404).json({ message: 'El elemento no ha sido encontrado' })
+    }
+})
+
+// En Vercel no se escucha en un puerto: se exporta la app
+if (!process.env.VERCEL) {
+    app.listen(PUERTO, () => {
+        console.log(`Servidor web iniciado en puerto: ${PUERTO}`)
+    })
+}
+
+export default app

@@ -1,0 +1,231 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "REST API - Videojuegos",
+    "version": "1.0.0",
+    "description": "API REST de videojuegos con autenticación JWT, Refresh Token, rate limit y MongoDB."
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    },
+    "schemas": {
+      "Auth": {
+        "type": "object",
+        "properties": {
+          "nombre": { "type": "string", "example": "Victor" },
+          "password": { "type": "string", "example": "123456" }
+        },
+        "required": ["nombre", "password"]
+      },
+      "Refresh": {
+        "type": "object",
+        "properties": {
+          "refreshToken": {
+            "type": "string",
+            "example": "tu_refresh_token_aqui"
+          }
+        },
+        "required": ["refreshToken"]
+      },
+      "User": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer", "example": 0 },
+          "nombre": { "type": "string", "example": "Ana" },
+          "edad": { "type": "integer", "example": 22 },
+          "password": { "type": "string", "example": "123456" }
+        },
+        "required": ["nombre", "password"]
+      },
+      "Videojuego": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer", "example": 0 },
+          "titulo": { "type": "string", "example": "Minecraft" },
+          "plataforma": { "type": "string", "example": "PC" },
+          "genero": { "type": "string", "example": "Sandbox" },
+          "precio": { "type": "number", "example": 29.99 },
+          "lanzamiento": { "type": "integer", "example": 2011 }
+        },
+        "required": [
+          "titulo",
+          "plataforma",
+          "genero",
+          "precio",
+          "lanzamiento"
+        ]
+      }
+    },
+    "parameters": {
+      "id": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "schema": { "type": "integer" }
+      }
+    }
+  },
+  "paths": {
+    "/api/login": {
+      "post": {
+        "summary": "Iniciar sesión",
+        "tags": ["Authentication"],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/Auth" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Tokens de acceso y refresco" }
+        }
+      }
+    },
+    "/api/refresh": {
+      "post": {
+        "summary": "Renovar access token",
+        "tags": ["Authentication"],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/Refresh" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Nuevo accessToken" }
+        }
+      }
+    },
+    "/api/users": {
+      "get": {
+        "summary": "Listar usuarios",
+        "tags": ["Users"],
+        "responses": {
+          "200": { "description": "Lista de usuarios" }
+        }
+      },
+      "post": {
+        "summary": "Crear usuario",
+        "tags": ["Users"],
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/User" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Usuario creado" }
+        }
+      }
+    },
+    "/api/users/{id}": {
+      "get": {
+        "summary": "Obtener usuario por ID",
+        "tags": ["Users"],
+        "parameters": [{ "$ref": "#/components/parameters/id" }],
+        "responses": {
+          "200": { "description": "Usuario encontrado" }
+        }
+      },
+      "put": {
+        "summary": "Actualizar usuario",
+        "tags": ["Users"],
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "$ref": "#/components/parameters/id" }],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "nombre": { "type": "string" },
+                  "edad": { "type": "integer" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Usuario actualizado" }
+        }
+      },
+      "delete": {
+        "summary": "Eliminar usuario",
+        "tags": ["Users"],
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "$ref": "#/components/parameters/id" }],
+        "responses": {
+          "200": { "description": "Usuario eliminado" }
+        }
+      }
+    },
+    "/api/videojuegos": {
+      "get": {
+        "summary": "Listar videojuegos",
+        "tags": ["Videojuegos"],
+        "responses": {
+          "200": { "description": "Lista de videojuegos" }
+        }
+      },
+      "post": {
+        "summary": "Añadir videojuego",
+        "tags": ["Videojuegos"],
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/Videojuego" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Videojuego añadido" }
+        }
+      }
+    },
+    "/api/videojuegos/{id}": {
+      "get": {
+        "summary": "Obtener videojuego por ID",
+        "tags": ["Videojuegos"],
+        "parameters": [{ "$ref": "#/components/parameters/id" }],
+        "responses": {
+          "200": { "description": "Videojuego encontrado" }
+        }
+      },
+      "put": {
+        "summary": "Actualizar videojuego",
+        "tags": ["Videojuegos"],
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "$ref": "#/components/parameters/id" }],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/Videojuego" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Videojuego actualizado" }
+        }
+      },
+      "delete": {
+        "summary": "Eliminar videojuego",
+        "tags": ["Videojuegos"],
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "$ref": "#/components/parameters/id" }],
+        "responses": {
+          "200": { "description": "Videojuego eliminado" }
+        }
+      }
+    }
+  }
+}
