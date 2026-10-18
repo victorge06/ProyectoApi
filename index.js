@@ -88,7 +88,7 @@ app.post('/api/login', async (request, response) => {
         return response.status(400).json({ message: 'nombre y password son obligatorios' })
 
     const user = await usuarios.findOne({ nombre })
-    
+
 if (!user || !user.password || !(await bcrypt.compare(password, user.password))) {
         return response.status(401).json({ message: "Credenciales incorrectas" })
     }
