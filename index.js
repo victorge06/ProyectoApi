@@ -18,10 +18,10 @@ if (!URL_BD || !SECRET_KEY || !REFRESH_KEY) {
     process.exit(1)
 }
 
-const app = express()
-app.set('trust proxy', 1)
-app.use(express.json())
-app.use(cors())
+const app = express() //Creamos aplicacion usando Express
+app.set('trust proxy', 1) // confiamos en el proxy delante del servidor
+app.use(express.json()) // Permite que el servidor entienda los datos que recibe en formato JSON
+app.use(cors()) // Activa CORS, un mecanismo que controla las peticiones que se pueden realizar entre distintos orígenes
 
 const limiter = rateLimit({
     windowMs: 15 * 60 * 1000,
